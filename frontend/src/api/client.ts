@@ -53,6 +53,8 @@ export interface JobView {
   log?: string
   tokenUsage?: number
   bilingualFailed?: boolean
+  translateLyrics?: boolean | null
+  translateEnabled?: boolean
   createdAt?: string
   updatedAt?: string
 }
@@ -87,6 +89,7 @@ export interface SettingsPayload {
   pass2Model: string
   translatorBaseUrl: string
   translatorModel: string
+  autoTranslateLyrics: boolean
   appleIdSet: boolean
   applePasswordSet: boolean
   mediaUserTokenSet: boolean
@@ -147,6 +150,11 @@ export const api = {
     request<{ status: string }>(`/api/jobs/${id}/rerun`, {
       method: "POST",
       body: JSON.stringify({ step: step ?? null, force }),
+    }),
+  setTranslate: (id: string, enabled: boolean) =>
+    request<{ status: string }>(`/api/jobs/${id}/translate`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
     }),
   pause: () => request<{ status: string }>("/api/queue/pause", { method: "POST" }),
   resume: () => request<{ status: string }>("/api/queue/resume", { method: "POST" }),

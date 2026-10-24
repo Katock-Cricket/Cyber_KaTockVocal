@@ -6,6 +6,7 @@ import {
   NInput,
   NInputNumber,
   NSpace,
+  NSwitch,
   useDialog,
   useMessage,
 } from "naive-ui"
@@ -38,6 +39,7 @@ const form = reactive({
   pass2Model: "",
   translatorBaseUrl: "",
   translatorModel: "",
+  autoTranslateLyrics: true,
   appleId: "",
   applePassword: "",
   mediaUserToken: "",
@@ -61,6 +63,7 @@ onMounted(async () => {
   form.pass2Model = settings.pass2Model
   form.translatorBaseUrl = settings.translatorBaseUrl
   form.translatorModel = settings.translatorModel
+  form.autoTranslateLyrics = settings.autoTranslateLyrics
   flags.appleIdSet = settings.appleIdSet
   flags.applePasswordSet = settings.applePasswordSet
   flags.mediaUserTokenSet = settings.mediaUserTokenSet
@@ -88,6 +91,7 @@ async function save() {
       pass2Model: form.pass2Model,
       translatorBaseUrl: form.translatorBaseUrl,
       translatorModel: form.translatorModel,
+      autoTranslateLyrics: form.autoTranslateLyrics,
       appleId: secret(form.appleId),
       applePassword: secret(form.applePassword),
       mediaUserToken: secret(form.mediaUserToken),
@@ -176,6 +180,12 @@ function showLogin() {
       </n-form-item>
       <n-form-item label="pass2 模型">
         <n-input v-model:value="form.pass2Model" />
+      </n-form-item>
+      <n-form-item label="自动翻译歌词">
+        <n-space align="center">
+          <n-switch v-model:value="form.autoTranslateLyrics" />
+          <span class="muted">非中文歌词会逐句翻译。每首歌仍可在任务详情里单独开关。</span>
+        </n-space>
       </n-form-item>
       <n-form-item label="翻译接口地址">
         <n-input v-model:value="form.translatorBaseUrl" />

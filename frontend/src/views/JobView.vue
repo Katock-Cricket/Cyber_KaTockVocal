@@ -1,20 +1,30 @@
 <script setup lang="ts">
-import { NButton, NCard, NSpace, NTag, useMessage } from "naive-ui"
+import { NButton, NCard, NSpace, NSwitch, NTag, useMessage } from "naive-ui"
 import { onMounted, ref } from "vue"
 import { useRoute } from "vue-router"
 import { api, type JobView } from "../api/client"
+import { useEventStream } from "../composables/useEventStream"
 import { JOB_STATUS, STEP_NAME, STEP_STATUS } from "../constants/status"
 import { artwork, clock, remain } from "../utils/format"
 
 const route = useRoute()
 const message = useMessage()
 const job = ref<JobView | null>(null)
+const translateEnabled = ref(true)
+const translateCustom = ref(false)
+const savingTranslate = ref(false)
 
 async function load() {
-  job.value = await api.job(String(route.params.id))
+  const current = await api.job(String(route.params.id))
+  job.value = current
+  translateEnabled.value = current.translateEnabled !== false
+  translateCustom.value = current.translateLyrics != null
 }
 
 onMounted(load)
+useEventStream(() => {
+  void load()
+})
 
 async function openFolder() {
   if (!job.value) return
@@ -56,6 +66,22 @@ async function cancel() {
   await api.cancel(job.value.id)
   await load()
 }
+
+async function changeTranslate(enabled: boolean) {
+  if (!job.value || savingTranslate.value) return
+  savingTranslate.value = true
+  translateEnabled.value = enabled
+  try {
+    const result = await api.setTranslate(job.value.id, enabled)
+    message.success(result.status === "queued" ? "已按这首的选择重新准备歌词" : "已记住这首的翻译选择")
+    await load()
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : "没能保存这首的翻译选择")
+    await load()
+  } finally {
+    savingTranslate.value = false
+  }
+}
 </script>
 
 <template>
@@ -74,6 +100,15 @@ async function cancel() {
         <div v-if="job.lyrics && job.lyrics.timed === false" style="color: #fbbf24">无时间轴</div>
         <div v-if="job.bilingualFailed" style="color: #f87171">双语失败</div>
         <div v-if="job.tokenUsage" class="muted">翻译 {{ job.tokenUsage }} token</div>
+        <n-space align="center" style="margin-top: 8px">
+          <n-switch
+            :value="translateEnabled"
+            :loading="savingTranslate"
+            @update:value="changeTranslate"
+          />
+          <span>翻译这首的歌词</span>
+          <span class="muted">{{ translateCustom ? "只对这首生效" : "跟随配置里的自动翻译" }}。中文歌词保持原文。</span>
+        </n-space>
         <div v-if="job.errorSummary" class="muted">{{ job.errorSummary }}</div>
       </div>
     </div>

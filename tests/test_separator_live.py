@@ -39,9 +39,7 @@ def test_real_separator_writes_44100_stereo(tmp_path: Path) -> None:
                 if step == STEP_PASS1
                 else "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt"
             )
-            produced = await separator.separate(
-                source, model, step, tmp_path / step, on_progress
-            )
+            produced = await separator.separate(source, model, step, tmp_path / step, on_progress)
             for path in produced.values():
                 probe = ffmpeg.probe(path)
                 assert wav_matches(probe)

@@ -16,17 +16,22 @@ class FsOpsError(Exception):
     pass
 
 
-def assert_allowed(name: str) -> None:
-    if name not in ALLOWED_NAMES:
+def assert_allowed(name: str, *, original: str | None = None) -> None:
+    if name != Path(name).name or name in {"", ".", ".."}:
         raise FsOpsError(f"拒绝写入歌曲目录中的非交付物：{name}")
+    if name in ALLOWED_NAMES:
+        return
+    if original and name == original and name.lower().endswith(".flac"):
+        return
+    raise FsOpsError(f"拒绝写入歌曲目录中的非交付物：{name}")
 
 
 def file_ready(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
 
-def backup_existing(song_dir: Path, name: str) -> Path | None:
-    assert_allowed(name)
+def backup_existing(song_dir: Path, name: str, *, original: str | None = None) -> Path | None:
+    assert_allowed(name, original=original)
     target = song_dir / name
     if not target.exists():
         return None
@@ -46,12 +51,13 @@ def publish(
     name: str,
     *,
     origin: str,
+    original: str | None = None,
 ) -> str:
     """把工作目录里的完整文件原子移动到歌曲目录。
 
-    返回 placed / kept / missing。
+    返回 placed / kept / missing。原曲文件名由 original 单独放行。
     """
-    assert_allowed(name)
+    assert_allowed(name, original=original)
     song_dir.mkdir(parents=True, exist_ok=True)
     target = song_dir / name
     if origin == "external" and target.exists():
@@ -59,7 +65,7 @@ def publish(
     if not work_file.is_file() or work_file.stat().st_size <= 0:
         return "missing"
     if target.exists():
-        backup_existing(song_dir, name)
+        backup_existing(song_dir, name, original=original)
     os.replace(work_file, target)
     return "placed"
 

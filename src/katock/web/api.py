@@ -19,6 +19,7 @@ from katock.adapters.translator import Translator
 from katock.adapters.wrapper import WrapperAdapter
 from katock.config import AppConfig, load_config, save_config
 from katock.domain.apple_url import parse_apple_url
+from katock.domain.status import JOB_ACTIVE
 from katock.domain.versions import version_tags
 from katock.logging_setup import read_job_log
 from katock.storage.db import session
@@ -42,6 +43,7 @@ from katock.storage.repo import (
     secret_flags,
     set_queue_paused,
     steps_for,
+    update_job,
 )
 from katock.web.services.submit import SubmitError, rerun_job, submit_tracks
 from katock.worker.scheduler import queue_eta_snapshot
@@ -90,6 +92,10 @@ class RerunIn(BaseModel):
     force: bool = False
 
 
+class TranslateChoiceIn(BaseModel):
+    enabled: bool
+
+
 class LoginIn(BaseModel):
     appleId: str
     password: str
@@ -115,6 +121,7 @@ class SettingsIn(BaseModel):
     pass2Model: str | None = None
     translatorBaseUrl: str | None = None
     translatorModel: str | None = None
+    autoTranslateLyrics: bool | None = None
     appleId: str | None = None
     applePassword: str | None = None
     mediaUserToken: str | None = None
@@ -379,6 +386,10 @@ def job_detail(job_id: str, request: Request) -> dict[str, Any]:
     view["log"] = read_job_log(config.logs_dir, job_id)
     view["tokenUsage"] = int(cache["token_usage"]) if cache else 0
     view["bilingualFailed"] = bool(cache and cache["bilingual_failed"])
+    raw_choice = row.get("translate_lyrics")
+    explicit = None if raw_choice is None else bool(int(raw_choice))
+    view["translateLyrics"] = explicit
+    view["translateEnabled"] = config.auto_translate_lyrics if explicit is None else explicit
     return view
 
 
@@ -404,6 +415,28 @@ def rerun(job_id: str, body: RerunIn, request: Request) -> dict[str, str]:
     except SubmitError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     return {"status": "queued"}
+
+
+@router.put("/jobs/{job_id}/translate")
+def set_job_translate(job_id: str, body: TranslateChoiceIn, request: Request) -> dict[str, str]:
+    config = _config(request)
+    with session(config.db_path) as conn:
+        row = get_job(conn, job_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        update_job(conn, job_id, translate_lyrics=1 if body.enabled else 0)
+        status = str(row["status"])
+        lyrics_ready = any(
+            item["name"] == "lyrics" and item["status"] in {"done", "skipped"}
+            for item in steps_for(conn, job_id)
+        )
+    if status not in JOB_ACTIVE and lyrics_ready:
+        try:
+            rerun_job(config, job_id, "lyrics", False)
+        except SubmitError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        return {"status": "queued"}
+    return {"status": "saved"}
 
 
 @router.post("/queue/pause")
@@ -444,6 +477,7 @@ def get_settings(request: Request) -> dict[str, Any]:
         "pass2Model": config.pass2_model,
         "translatorBaseUrl": config.translator_base_url,
         "translatorModel": config.translator_model,
+        "autoTranslateLyrics": config.auto_translate_lyrics,
         **flags,
     }
 
@@ -466,6 +500,7 @@ def put_settings(body: SettingsIn, request: Request) -> dict[str, str]:
         "pass2Model": "pass2_model",
         "translatorBaseUrl": "translator_base_url",
         "translatorModel": "translator_model",
+        "autoTranslateLyrics": "auto_translate_lyrics",
     }
     payload = body.model_dump(exclude_none=True)
     data = config.model_dump()

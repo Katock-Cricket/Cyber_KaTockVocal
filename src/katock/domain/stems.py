@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from katock.domain.status import STEP_PASS1, STEP_PASS2
 
-FILE_ORIGINAL = "原曲.flac"
 FILE_INSTRUMENTAL = "伴奏.wav"
 FILE_LEAD = "主音.wav"
 FILE_HARMONY = "和声.wav"
@@ -15,7 +14,6 @@ FILE_META = ".ktvmeta.json"
 FILE_FULL_VOCAL = "完整人声.wav"
 
 DELIVERABLE_FILES = (
-    FILE_ORIGINAL,
     FILE_INSTRUMENTAL,
     FILE_LEAD,
     FILE_HARMONY,

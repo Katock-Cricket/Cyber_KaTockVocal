@@ -8,9 +8,14 @@ import pytest
 
 from katock.domain.apple_url import parse_apple_url
 from katock.domain.eta import PendingWork, Sample, estimate_stage, queue_remaining_seconds
-from katock.domain.language import han_ratio, needs_translation
+from katock.domain.language import han_ratio, needs_translation, translation_enabled
 from katock.domain.lyrics import LyricLine, parse_timecode, parse_ttml, render_lrc, render_srt
-from katock.domain.naming import resolve_directory, sanitize_title
+from katock.domain.naming import (
+    locate_original,
+    original_filename,
+    resolve_directory,
+    sanitize_title,
+)
 from katock.domain.state import InvalidTransition, transit
 from katock.domain.stems import PASS_OUTPUT_NAMES, output_names
 from katock.domain.versions import version_tags
@@ -22,6 +27,17 @@ def test_sanitize_illegal_and_length() -> None:
     long = "歌" * 90
     assert len(sanitize_title(long)) == 80
     assert sanitize_title(long).endswith("…")
+
+
+def test_original_filename_uses_title(tmp_path: Path) -> None:
+    song = tmp_path / "Bohemian Rhapsody"
+    song.mkdir()
+    assert original_filename("Bohemian Rhapsody", song) == "Bohemian Rhapsody.flac"
+    assert original_filename("a/b", song) == "a／b.flac"
+    kept = song / "酒干倘卖无-苏芮.flac"
+    kept.write_bytes(b"flac")
+    found = locate_original(song, "酒干倘卖无", None, "external")
+    assert found == kept
 
 
 def test_directory_conflict_and_external(tmp_path: Path) -> None:
@@ -92,6 +108,10 @@ def test_language() -> None:
     assert needs_translation("en", "Is this the real life") is True
     assert needs_translation(None, "是否我真的一无所有") is False
     assert needs_translation(None, "Is this the real life") is True
+    assert translation_enabled(True, None) is True
+    assert translation_enabled(False, None) is False
+    assert translation_enabled(False, 1) is True
+    assert translation_enabled(True, 0) is False
     assert han_ratio("これはテスト") == 0
 
 

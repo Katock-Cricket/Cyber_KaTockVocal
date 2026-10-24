@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from katock.domain.stems import FILE_ORIGINAL
 from katock.security.redact import redact
 from katock.storage.fsops import FsOpsError, file_ready, publish
 from katock.storage.meta import empty_meta, read_meta, write_meta
@@ -25,25 +24,33 @@ def test_redact_secrets() -> None:
 def test_external_keeps_existing_and_created_replaces(tmp_path: Path) -> None:
     song = tmp_path / "song"
     song.mkdir()
-    original = song / FILE_ORIGINAL
+    name = "示例.flac"
+    original = song / name
     original.write_bytes(b"old-audio")
     user_file = song / "project.aup3"
     user_file.write_text("user", encoding="utf-8")
     work = tmp_path / "new.flac"
     work.write_bytes(b"new-audio")
 
-    assert publish(work, song, FILE_ORIGINAL, origin="external") == "kept"
+    assert publish(work, song, name, origin="external", original=name) == "kept"
     assert original.read_bytes() == b"old-audio"
     assert user_file.read_text(encoding="utf-8") == "user"
 
     work.write_bytes(b"new-audio")
-    assert publish(work, song, FILE_ORIGINAL, origin="created") == "placed"
+    assert publish(work, song, name, origin="created", original=name) == "placed"
     assert original.read_bytes() == b"new-audio"
     backups = list(song.glob("_backup_*"))
     assert backups
-    assert (backups[0] / FILE_ORIGINAL).read_bytes() == b"old-audio"
+    assert (backups[0] / name).read_bytes() == b"old-audio"
     assert user_file.read_text(encoding="utf-8") == "user"
     assert file_ready(original)
+
+
+def test_reject_original_label(tmp_path: Path) -> None:
+    work = tmp_path / "new.flac"
+    work.write_bytes(b"audio")
+    with pytest.raises(FsOpsError):
+        publish(work, tmp_path / "song", "原曲.flac", origin="created")
 
 
 def test_reject_unknown_name(tmp_path: Path) -> None:

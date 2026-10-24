@@ -21,6 +21,36 @@ class ProcResult:
         return f"{self.stdout}\n{self.stderr}".strip()
 
 
+def take_lines(pending: bytearray, *, final: bool) -> list[str]:
+    """按换行或回车切分。进度条只回车不换行，不能交给 readline。"""
+    lines: list[str] = []
+    while True:
+        newline = pending.find(b"\n")
+        carriage = pending.find(b"\r")
+        cuts = [index for index in (newline, carriage) if index >= 0]
+        if not cuts:
+            break
+        cut = min(cuts)
+        if pending[cut] == ord("\r") and cut + 1 >= len(pending) and not final:
+            break
+        raw = bytes(pending[:cut])
+        drop = 1
+        if pending[cut] == ord("\r") and cut + 1 < len(pending) and pending[cut + 1] == ord("\n"):
+            drop = 2
+        del pending[: cut + drop]
+        if raw:
+            lines.append(raw.decode("utf-8", errors="replace").rstrip("\r\n"))
+    if final and pending:
+        text = bytes(pending).decode("utf-8", errors="replace").rstrip("\r\n")
+        pending.clear()
+        if text:
+            lines.append(text)
+    elif len(pending) > 1_048_576:
+        lines.append(bytes(pending).decode("utf-8", errors="replace"))
+        pending.clear()
+    return lines
+
+
 def creation_flags() -> int:
     if sys.platform == "win32":
         return subprocess.CREATE_NO_WINDOW
@@ -70,14 +100,21 @@ async def stream_cmd(
     async def _read(stream: asyncio.StreamReader | None, bucket: list[str]) -> None:
         if stream is None:
             return
+        pending = bytearray()
+
+        async def emit(final: bool) -> None:
+            for line in take_lines(pending, final=final):
+                bucket.append(line)
+                if on_line is not None:
+                    await on_line(line)
+
         while True:
-            raw = await stream.readline()
-            if not raw:
+            chunk = await stream.read(65536)
+            if not chunk:
+                await emit(True)
                 break
-            line = raw.decode("utf-8", errors="replace").rstrip()
-            bucket.append(line)
-            if on_line is not None:
-                await on_line(line)
+            pending.extend(chunk)
+            await emit(False)
 
     async def _wait() -> int:
         assert process.stdout is not None

@@ -41,8 +41,9 @@ class AppConfig(BaseModel):
     pass2_yaml: str = "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956_config.yaml"
     translator_base_url: str = "https://api.chatanywhere.tech/v1"
     translator_model: str = "deepseek-v4.1-flash-1017"
-    eta_pass1: float = 1.5
-    eta_pass2: float = 1.2
+    auto_translate_lyrics: bool = True
+    eta_pass1: float = 0.24
+    eta_pass2: float = 0.28
     eta_download_bps: float = 2_000_000
     eta_bytes_per_audio_s: float = 1_500_000
     eta_lyrics_per_line: float = 0.2
@@ -167,6 +168,7 @@ def dump_config(config: AppConfig) -> str:
         "pass2_yaml",
         "translator_base_url",
         "translator_model",
+        "auto_translate_lyrics",
         "eta_pass1",
         "eta_pass2",
         "eta_download_bps",
@@ -186,6 +188,8 @@ def dump_config(config: AppConfig) -> str:
         if isinstance(value, str):
             escaped = value.replace("\\", "\\\\").replace('"', '\\"')
             lines.append(f'{name} = "{escaped}"')
+        elif isinstance(value, bool):
+            lines.append(f"{name} = {'true' if value else 'false'}")
         elif isinstance(value, float):
             lines.append(f"{name} = {value}")
         else:

@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     force_steps TEXT NOT NULL DEFAULT '[]',
     error_summary TEXT,
     error_kind TEXT,
+    translate_lyrics INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -138,6 +139,9 @@ def connect(path: Path) -> sqlite3.Connection:
 def migrate(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     conn.executescript(INDEXES)
+    columns = {str(item[1]) for item in conn.execute("PRAGMA table_info(jobs)")}
+    if "translate_lyrics" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN translate_lyrics INTEGER")
     row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
     if row is None:
         conn.execute("INSERT INTO schema_version(version) VALUES (1)")

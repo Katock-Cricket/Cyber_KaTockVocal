@@ -29,3 +29,10 @@ def is_chinese_family(language: str | None, text: str) -> bool:
 
 def needs_translation(language: str | None, text: str) -> bool:
     return not is_chinese_family(language, text)
+
+
+def translation_enabled(auto: bool, choice: int | None) -> bool:
+    """choice 为空时跟随配置开关，否则以这首歌的选择为准。"""
+    if choice is None:
+        return auto
+    return bool(choice)

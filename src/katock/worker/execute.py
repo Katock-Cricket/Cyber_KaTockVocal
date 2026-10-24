@@ -16,8 +16,9 @@ from katock.adapters.translator import TranslationError, Translator
 from katock.config import AppConfig
 from katock.domain.eta import Sample, estimate_stage
 from katock.domain.failures import ENV_NOT_READY, UNKNOWN, suggestion
-from katock.domain.language import needs_translation
+from katock.domain.language import needs_translation, translation_enabled
 from katock.domain.lyrics import parse_ttml, render_lrc, render_srt
+from katock.domain.naming import locate_original, original_filename
 from katock.domain.status import (
     STEP_COVER,
     STEP_DOWNLOAD,
@@ -34,7 +35,6 @@ from katock.domain.stems import (
     FILE_INSTRUMENTAL,
     FILE_LEAD,
     FILE_LRC,
-    FILE_ORIGINAL,
     FILE_SRT,
     STEM_INSTRUMENTAL,
     STEM_VOCALS,
@@ -48,6 +48,7 @@ from katock.storage.repo import (
     SECRET_TRANSLATOR_KEY,
     add_sample,
     emit_event,
+    get_job,
     get_lyrics_cache,
     get_secret,
     list_env,
@@ -70,7 +71,7 @@ def _meta(song_dir: Path) -> dict[str, Any]:
 
 
 def _step_done(meta: dict[str, Any], name: str) -> bool:
-    return meta.get("steps", {}).get(name, {}).get("status") == "done"
+    return meta.get("steps", {}).get(name, {}).get("status") in {"done", "skipped"}
 
 
 def _origin(job: dict[str, Any], meta: dict[str, Any]) -> str:
@@ -100,7 +101,10 @@ def should_skip(config: AppConfig, job: dict[str, Any], step: str) -> bool:
         return origin == "external" or _step_done(meta, name)
 
     if step == STEP_DOWNLOAD:
-        return trusted(STEP_DOWNLOAD, FILE_ORIGINAL)
+        found = locate_original(song_dir, str(job.get("title") or ""), meta, origin)
+        if found is None:
+            return False
+        return origin == "external" or _step_done(meta, STEP_DOWNLOAD)
     if step == STEP_COVER:
         return trusted(STEP_COVER, FILE_COVER)
     if step == STEP_LYRICS:
@@ -252,8 +256,11 @@ async def _download(config: AppConfig, db_path: Path, job: dict[str, Any]) -> st
     await _wait_environment(config, db_path, str(job["id"]))
     _mark(db_path, config, str(job["id"]), STEP_DOWNLOAD, status="running")
     song_dir = Path(str(job["dir_path"]))
-    origin = _origin(job, _meta(song_dir))
-    if origin == "external" and file_ready(song_dir / FILE_ORIGINAL):
+    meta = _meta(song_dir)
+    origin = _origin(job, meta)
+    title = str(job.get("title") or "")
+    filename = original_filename(title, song_dir)
+    if origin == "external" and locate_original(song_dir, title, meta, origin) is not None:
         return "外部目录已有原曲，保持原样"
     work = config.work_dir / str(job["id"])
     work.mkdir(parents=True, exist_ok=True)
@@ -285,7 +292,7 @@ async def _download(config: AppConfig, db_path: Path, job: dict[str, Any]) -> st
     if last is not None or audio is None:
         assert last is not None
         raise StepFailed(last.kind, last.summary, last.detail)
-    flac = work / FILE_ORIGINAL
+    flac = work / filename
     if audio.suffix.lower() != ".flac":
         ffmpeg.to_flac(audio, flac)
     elif audio != flac:
@@ -297,8 +304,9 @@ async def _download(config: AppConfig, db_path: Path, job: dict[str, Any]) -> st
         raise StepFailed(
             UNKNOWN, f"原曲时长 {probe.duration_s:.1f}s 与曲目信息 {expected:.1f}s 相差超过 1 秒"
         )
-    publish(flac, song_dir, FILE_ORIGINAL, origin=origin)
+    publish(flac, song_dir, filename, origin=origin, original=filename)
     meta = _meta(song_dir)
+    meta["originalFile"] = filename
     meta["source"] = {"sampleRate": probe.sample_rate, "bitDepth": probe.bit_depth}
     write_meta(song_dir, meta)
     return f"{probe.sample_rate} Hz / {probe.bit_depth} bit"
@@ -336,10 +344,10 @@ async def _cover(config: AppConfig, db_path: Path, job: dict[str, Any]) -> str:
     image.write_bytes(content)
     publish(image, song_dir, FILE_COVER, origin=origin)
     note = f"{width}x{height}"
-    original = song_dir / FILE_ORIGINAL
-    if origin != "external" and file_ready(original):
+    original = locate_original(song_dir, str(job.get("title") or ""), _meta(song_dir), origin)
+    if origin != "external" and original is not None and file_ready(original):
         ffmpeg = Ffmpeg(config.ffmpeg_path, config.ffprobe_path)
-        tagged = work / "原曲.tagged.flac"
+        tagged = work / f"{original.stem}.tagged.flac"
         tags = {
             "title": str(job.get("title") or ""),
             "artist": str(job.get("artist") or ""),
@@ -351,7 +359,7 @@ async def _cover(config: AppConfig, db_path: Path, job: dict[str, Any]) -> str:
         if job.get("year"):
             tags["date"] = str(job["year"])
         ffmpeg.tag_flac(original, tagged, tags, image if image.is_file() else None)
-        publish(tagged, song_dir, FILE_ORIGINAL, origin=origin)
+        publish(tagged, song_dir, original.name, origin=origin, original=original.name)
     meta = _meta(song_dir)
     meta.setdefault("steps", {})
     cover_info = meta["steps"].get(STEP_COVER, {})
@@ -387,7 +395,13 @@ async def _lyrics(config: AppConfig, db_path: Path, job: dict[str, Any]) -> str:
     original = [{"text": line.text, "startMs": line.start_ms} for line in document.lines]
     original_json = json.dumps(original, ensure_ascii=False)
     text = "\n".join(line.text for line in document.lines)
-    translate = needs_translation(language, text)
+    with session(db_path) as conn:
+        fresh = get_job(conn, str(job["id"]))
+    choice = fresh.get("translate_lyrics") if fresh else job.get("translate_lyrics")
+    if choice is not None:
+        choice = int(choice)
+    wants_translation = translation_enabled(config.auto_translate_lyrics, choice)
+    translate = wants_translation and needs_translation(language, text)
     translations: tuple[str, ...] | None = None
     tokens = 0
     note = ""
@@ -413,6 +427,10 @@ async def _lyrics(config: AppConfig, db_path: Path, job: dict[str, Any]) -> str:
             except TranslationError as exc:
                 bilingual_failed = True
                 note = f"双语失败：{exc.summary}"
+    elif needs_translation(language, text):
+        note = (
+            "这首已关闭翻译，输出单语歌词" if choice is not None else "已关闭自动翻译，输出单语歌词"
+        )
     work = config.work_dir / str(job["id"])
     work.mkdir(parents=True, exist_ok=True)
     lrc_path = work / FILE_LRC
@@ -466,8 +484,10 @@ async def _separate(config: AppConfig, db_path: Path, job: dict[str, Any], step:
     origin = _origin(job, _meta(song_dir))
     work = config.work_dir / str(job["id"])
     work.mkdir(parents=True, exist_ok=True)
+    title = str(job.get("title") or "")
     if step == STEP_PASS1:
-        source = song_dir / FILE_ORIGINAL
+        located = locate_original(song_dir, title, _meta(song_dir), origin)
+        source = located or song_dir / original_filename(title, song_dir)
         model = config.pass1_model
     else:
         source = work / FILE_FULL_VOCAL
@@ -478,7 +498,10 @@ async def _separate(config: AppConfig, db_path: Path, job: dict[str, Any], step:
         raise StepFailed(UNKNOWN, f"分离输入不存在：{source.name}")
     separator = Separator(config.separator_path, config.models_dir)
     ffmpeg = Ffmpeg(config.ffmpeg_path, config.ffprobe_path)
-    original = ffmpeg.probe(song_dir / FILE_ORIGINAL)
+    located = locate_original(song_dir, title, _meta(song_dir), origin)
+    if located is None:
+        raise StepFailed(UNKNOWN, "分离输入不存在：原曲")
+    original = ffmpeg.probe(located)
 
     async def on_progress(value: float) -> None:
         if value < 0:
@@ -547,12 +570,14 @@ def _finalize(config: AppConfig, db_path: Path, job: dict[str, Any]) -> str:
     if not (file_ready(song_dir / FILE_LRC) and file_ready(song_dir / FILE_SRT)):
         missing.append("歌词")
     critical: list[str] = []
-    for filename, label in (
-        (FILE_ORIGINAL, "原曲"),
+    original = locate_original(song_dir, str(fresh.get("title") or ""), meta, _origin(fresh, meta))
+    checks = [
+        (original.name if original is not None else "", "原曲"),
         (FILE_INSTRUMENTAL, "伴奏"),
         (FILE_LEAD, "主音"),
         (FILE_HARMONY, "和声"),
-    ):
+    ]
+    for filename, label in checks:
         if not file_ready(song_dir / filename):
             critical.append(label)
     meta["missing"] = missing + critical
