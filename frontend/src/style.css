@@ -1,0 +1,129 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #100e16;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1080px;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px 18px;
+}
+
+.brand strong {
+  font-size: 16px;
+  letter-spacing: 0.04em;
+}
+
+.brand span {
+  color: #a39bb8;
+  font-size: 12px;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.nav-link.router-link-active {
+  background: rgba(192, 132, 252, 0.16);
+  color: #f3e8ff;
+}
+
+.cover {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: #2a2438;
+}
+
+.row-card {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 16px;
+  align-items: center;
+}
+
+.muted {
+  color: #a39bb8;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stage-bar {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.stage {
+  height: 8px;
+  border-radius: 999px;
+  background: #322b40;
+  overflow: hidden;
+  position: relative;
+}
+
+.stage > span {
+  display: block;
+  height: 100%;
+  background: #67e8f9;
+}
+
+.stage.done > span {
+  width: 100% !important;
+  background: #4ade80;
+}
+
+.stage.failed > span,
+.stage.failed {
+  background: #f87171;
+}
+
+.stage.skipped > span {
+  width: 100% !important;
+  background: #6b6478;
+}
+
+.stage.estimated > span {
+  background: repeating-linear-gradient(
+    -45deg,
+    #67e8f9,
+    #67e8f9 6px,
+    #8b5cf6 6px,
+    #8b5cf6 12px
+  );
+}
+
+.empty {
+  padding: 48px 12px;
+  text-align: center;
+  color: #a39bb8;
+}

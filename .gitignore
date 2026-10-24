@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Cyber_KaTockVocal
+tools/
+node_modules/
+frontend/dist/
+*.db-journal
+*.db-wal
+*.db-shm
+/.workbuddy
